@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Мини-чат с видео</title>
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.4.7/dist/peerjs.min.js"></script>
+<style>
+body{margin:0;font-family:sans-serif;position:relative;}
+header{display:flex;justify-content:space-between;align-items:center;padding:10px;background:#0366d6;color:#fff;}
+header h1{margin:0;font-size:18px;}
+header button{padding:6px 10px;border:none;border-radius:4px;cursor:pointer;background:#fff;color:#0366d6;margin-left:6px;}
+#chatScreen,#profileScreen{padding:16px;}
+#chatScreen{display:block;}
+#profileScreen{display:none;}
+#messages{border:1px solid #ddd;padding:8px;height:300px;overflow-y:auto;margin-bottom:8px;border-radius:6px;}
+.message{display:flex;gap:8px;margin:4px 0;padding:4px 6px;border-radius:4px;flex-direction:column;}
+.message-content{display:flex;gap:8px;}
+.message.me .text{background:#d1e7dd;}
+.message.other .text{background:#f8d7da;}
+.message .avatar{width:32px;height:32px;border-radius:50%;object-fit:cover;}
+.message .text{padding:6px 10px;border-radius:6px;background:#eee;max-width:70%;}
+.message.me .message-content{justify-content:flex-end;}
+.message.other .message-content{justify-content:flex-start;}
+.message .nickname{font-size:12px;color:#555;}
+input[type="text"]{padding:8px;width:50%;margin-right:8px;border-radius:6px;border:1px solid #ccc;}
+button.sendBtn,button.endBtn, #sendImageBtn, #callBtn{padding:8px 12px;border:none;border-radius:6px;cursor:pointer;margin-top:4px;}
+button.sendBtn{background:#28a745;color:#fff;}
+button.endBtn{background:#dc3545;color:#fff;margin-left:8px;}
+#sendImageBtn{background:#ffc107;color:#000;margin-left:4px;}
+#callBtn{background:#17a2b8;color:#fff;margin-left:4px;}
+.avatar-container{display:flex;align-items:center;gap:16px;margin-bottom:16px;}
+.avatar-container img{width:100px;height:100px;border-radius:50%;object-fit:cover;border:2px solid #ccc;}
+input[type="file"]{display:none;}
+label.uploadBtn{padding:6px 12px;background:#0366d6;color:#fff;border-radius:6px;cursor:pointer;}
+#idContainer{margin-top:8px;font-size:14px;}
+#howtoBtn{position:fixed;left:16px;bottom:16px;padding:10px 14px;background:#ffc107;color:#000;border:none;border-radius:6px;cursor:pointer;z-index:1000;}
+#instructionModal{display:none;position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);background:#fff;padding:20px;border-radius:8px;box-shadow:0 0 10px rgba(0,0,0,0.5);max-width:300px;z-index:1001;}
+#instructionModal h3{margin-top:0;}
+#instructionModal button{margin-top:12px;background:#0366d6;color:#fff;padding:6px 10px;border:none;border-radius:6px;cursor:pointer;}
+#videoContainer{margin-top:10px;display:flex;gap:8px;}
+#videoContainer video{width:200px;border:1px solid #ccc;border-radius:6px;}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Мини-чат</h1>
+  <div>
+    <button id="profileBtn">Профиль</button>
+    <button id="closeProfileBtn" style="display:none;">✖</button>
+  </div>
+</header>
+
+<div id="chatScreen">
+  <div>
+    <input type="text" id="peerIdInput" placeholder="Введите ID собеседника">
+    <button id="connectBtn">Подключиться</button>
+    <button id="endBtn" class="endBtn">Завершить</button>
+  </div>
+  <div id="idContainer">
+    Ваш ID: <span id="myId">...</span> <button id="copyBtn" disabled>Скопировать ID</button>
+  </div>
+  <div id="messages"></div>
+  <div>
+    <input type="text" id="msgInput" placeholder="Введите сообщение">
+    <button class="sendBtn" id="sendBtn">Отправить</button>
+    <button id="sendImageBtn">+</button>
+    <button id="callBtn">📹</button>
+    <input type="file" id="imageInput" accept="image/*" style="display:none;">
+  </div>
+  <div id="videoContainer">
+    <video id="localVideo" autoplay muted></video>
+    <video id="remoteVideo" autoplay></video>
+  </div>
+</div>
+
+<div id="profileScreen">
+  <h2>Профиль</h2>
+  <div class="avatar-container">
+    <img id="avatar" src="https://via.placeholder.com/100" alt="Аватар">
+    <div>
+      <label class="uploadBtn" for="avatarInput">Загрузить фото</label>
+      <input type="file" id="avatarInput" accept="image/*">
+    </div>
+  </div>
+  <div>
+    <label>Никнейм:</label>
+    <input type="text" id="nickname" placeholder="Введите никнейм">
+  </div>
+  <button id="saveProfileBtn">Сохранить профиль</button>
+</div>
+
+<button id="howtoBtn">Как подключиться?</button>
+<div id="instructionModal">
+  <h3>Инструкция подключения</h3>
+  <ol>
+    <li>Введите ID своего собеседника и нажмите кнопку «Подключиться».</li>
+    <li>Ожидайте подключения. Как только вы подключитесь, вам об этом сообщат.</li>
+    <li>Чтобы завершить чат, нажмите кнопку «Завершить».</li>
+  </ol>
+  <button id="closeInstruction">Закрыть</button>
+</div>
+
+<script>
+(async function(){
+const profileBtn=document.getElementById('profileBtn');
+const closeProfileBtn=document.getElementById('closeProfileBtn');
+const chatScreen=document.getElementById('chatScreen');
+const profileScreen=document.getElementById('profileScreen');
+const avatarImg=document.getElementById('avatar');
+const avatarInput=document.getElementById('avatarInput');
+const nicknameInput=document.getElementById('nickname');
+const saveProfileBtn=document.getElementById('saveProfileBtn');
+
+const peerIdInput=document.getElementById('peerIdInput');
+const connectBtn=document.getElementById('connectBtn');
+const endBtn=document.getElementById('endBtn');
+const msgInput=document.getElementById('msgInput');
+const sendBtn=document.getElementById('sendBtn');
+const sendImageBtn=document.getElementById('sendImageBtn');
+const callBtn=document.getElementById('callBtn');
+const imageInput=document.getElementById('imageInput');
+const messagesDiv=document.getElementById('messages');
+
+const myIdSpan=document.getElementById('myId');
+const copyBtn=document.getElementById('copyBtn');
+
+const localVideo=document.getElementById('localVideo');
+const remoteVideo=document.getElementById('remoteVideo');
+
+const howtoBtn=document.getElementById('howtoBtn');
+const instructionModal=document.getElementById('instructionModal');
+const closeInstruction=document.getElementById('closeInstruction');
+
+let peer=new Peer();
+let conn=null;
+let localStream=null;
+let currentCall=null;
+
+// Профиль
+if(localStorage.getItem('avatar')) avatarImg.src=localStorage.getItem('avatar');
+if(localStorage.getItem('nickname')) nicknameInput.value=localStorage.getItem('nickname');
+
+profileBtn.onclick=()=>{chatScreen.style.display='none';profileScreen.style.display='block';profileBtn.style.display='none';closeProfileBtn.style.display='inline-block';};
+closeProfileBtn.onclick=()=>{profileScreen.style.display='none';chatScreen.style.display='block';profileBtn.style.display='inline-block';closeProfileBtn.style.display='none';};
+
+avatarInput.addEventListener('change',function(){const file=this.files[0];if(!file)return;const reader=new FileReader();reader.onload=function(e){avatarImg.src=e.target.result;};reader.readAsDataURL(file);});
+saveProfileBtn.addEventListener('click',()=>{localStorage.setItem('avatar',avatarImg.src);localStorage.setItem('nickname',nicknameInput.value.trim());alert('Профиль сохранён!');});
+
+copyBtn.onclick=()=>{const id=myIdSpan.textContent;if(!id||id==='...')return alert('ID ещё не готов');navigator.clipboard.writeText(id).then(()=>{copyBtn.textContent='Скопировано';setTimeout(()=>copyBtn.textContent='Скопировать ID',1500);});};
+
+peer.on('open',id=>{myIdSpan.textContent=id;copyBtn.disabled=false;});
+
+connectBtn.onclick=()=>{const id=peerIdInput.value.trim();if(id){conn=peer.connect(id);setupConnection();}else alert('Вы будете ждать входящего соединения...');};
+
+endBtn.onclick=()=>{if(conn){conn.close();addMessage('Соединение завершено','other');conn=null;sendBtn.disabled=true;sendImageBtn.disabled=true;callBtn.disabled=true;}if(currentCall){currentCall.close();currentCall=null;remoteVideo.srcObject=null;localVideo.srcObject=null;}};
+
+peer.on('connection',c=>{conn=c;setupConnection();});
+function setupConnection(){if(!conn)return;conn.on('data',data=>{addMessage(data.text,'other',data.avatar,data.nickname,data.image);});conn.on('open',()=>{sendBtn.disabled=false;sendImageBtn.disabled=false;callBtn.disabled=false;addMessage('Вы подключились!','other');});conn.on('close',()=>{sendBtn.disabled=true;sendImageBtn.disabled=true;callBtn.disabled=true;});}
+
+sendBtn.onclick=()=>{const text=msgInput.value.trim();if(!text||!conn||conn.open===false)return;const messageData={text,avatar:localStorage.getItem('avatar')||'https://via.placeholder.com/32',nickname:localStorage.getItem('nickname')||'Я'};conn.send(messageData);addMessage(messageData.text,'me',messageData.avatar,messageData.nickname);msgInput.value='';};
+
+sendImageBtn.onclick=()=>imageInput.click();
+imageInput.addEventListener('change',function(){const file=this.files[0];if(!file)return;const reader=new FileReader();reader.onload=function(e){const imageData=e.target.result;if(!conn||conn.open===false)return;const messageData={text:'',image:imageData,avatar:localStorage.getItem('avatar')||'https://via.placeholder.com/32',nickname:localStorage.getItem('nickname')||'Я'};conn.send(messageData);addMessage('', 'me', messageData.avatar, messageData.nickname, messageData.image);};reader.readAsDataURL(file);this.value='';});
+
+// Авто-запрос камеры
+(async function initCamera(){try{localStream=await navigator.mediaDevices.getUserMedia({video:true,audio:true});localVideo.srcObject=localStream;}catch(e){alert('Доступ к камере и микрофону отклонён. Откройте страницу на HTTPS или localhost и разрешите доступ.');console.error(e);}})();
+
+callBtn.onclick=async()=>{try{if(!localStream)localStream=await navigator.mediaDevices.getUserMedia({video:true,audio:true});localVideo.srcObject=localStream;if(!conn||conn.open===false)return alert('Нет собеседника');const id=peerIdInput.value.trim();if(!id)return alert('Введите ID собеседника');const call=peer.call(id,localStream);setupCall(call);}catch(e){alert('Доступ к камере и микрофону отклонён');console.error(e);}};
+
+peer.on('call',async call=>{try{if(!localStream)localStream=await navigator.mediaDevices.getUserMedia({video:true,audio:true});localVideo.srcObject=localStream;call.answer(localStream);setupCall(call);}catch(e){alert('Не удалось получить доступ к камере и микрофону');console.error(e);}});
+
+function setupCall(call){if(currentCall)currentCall.close();currentCall=call;call.on('stream',stream=>{remoteVideo.srcObject=stream;});call.on('close',()=>{currentCall=null;remoteVideo.srcObject=null;addMessage('Видеозвонок завершён','other');});}
+
+function addMessage(msg,type,avatar,nickname,image){const div=document.createElement('div');div.className='message '+type;const nicknameEl=document.createElement('div');nicknameEl.className='nickname';nicknameEl.textContent='От '+(nickname||'Неизвестный');const contentDiv=document.createElement('div');contentDiv.className='message-content';const avatarEl=document.createElement('img');avatarEl.className='avatar';avatarEl.src=avatar||'https://via.placeholder.com/32';const textEl=document.createElement('div');textEl.className='text';if(msg)textEl.textContent=msg;if(type==='me'){if(image){const imgEl=document.createElement('img');imgEl.src=image;imgEl.style.maxWidth='200px';imgEl.style.borderRadius='6px';contentDiv.appendChild(imgEl);}contentDiv.appendChild(textEl);contentDiv.appendChild(avatarEl);}else{contentDiv.appendChild(avatarEl);if(image){const imgEl=document.createElement('img');imgEl.src=image;imgEl.style.maxWidth='200px';imgEl.style.borderRadius='6px';contentDiv.appendChild(imgEl);}contentDiv.appendChild(textEl);}div.appendChild(nicknameEl);div.appendChild(contentDiv);messagesDiv.appendChild(div);messagesDiv.scrollTop=messagesDiv.scrollHeight;}
+
+sendBtn.disabled=true;sendImageBtn.disabled=true;callBtn.disabled=true;
+
+howtoBtn.onclick=()=>{instructionModal.style.display='block';};
+closeInstruction.onclick=()=>{instructionModal.style.display='none';};
+
+})();
+</script>
+</body>
+</html>
